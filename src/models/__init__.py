@@ -1,0 +1,1 @@
+from .single_hyper_tkan_model import SingleHyperTKAN

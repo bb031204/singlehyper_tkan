@@ -1,0 +1,136 @@
+# ===========================================
+# 单超图-TKAN 气象预测模型配置文件
+# ===========================================
+
+# --- 数据集选择 ---
+dataset_selection:
+  Temperature: true    # 温度预测任务
+  Cloud: false         # 云量
+  Humidity: false      # 湿度
+  Wind: false          # 风速
+
+# --- 元信息 ---
+meta:
+  experiment_name: "SingleHyperTKAN_Temperature"  # 实验名称
+  element: "Temperature"                          # 预测要素
+  device: "cuda"                                  # 设备类型
+  gpu: 0                                          # GPU 编号
+  seed: 42                                        # 随机种子
+  num_workers: 0                                  # 数据加载线程数 (Windows 建议设为 0)
+
+# --- 数据配置 ---
+data:
+  train_path: "D:/bishe/WYB/temperature/trn.pkl"     # 训练集路径
+  val_path: "D:/bishe/WYB/temperature/val.pkl"       # 验证集路径
+  test_path: "D:/bishe/WYB/temperature/test.pkl"     # 测试集路径
+  position_path: "D:/bishe/WYB/temperature/position.pkl"  # 站点位置文件
+  use_context: true                                  # 是否使用上下文特征
+  context_dim: 8                                     # 上下文特征维度
+  use_dim4: true                                     # 是否使用第4维特征
+  context_features:
+    use_longitude: true   # 经度
+    use_latitude: true    # 纬度
+    use_altitude: true    # 海拔
+    use_year: true        # 年份
+    use_month: true       # 月份
+    use_day: true         # 日期
+    use_hour: true        # 小时
+    use_region: false     # 区域编码
+  normalize: true                # 是否归一化
+  scaler_type: "standard"        # 归一化方式: standard/minmax
+  kelvin_to_celsius: true        # 温度单位转换 K → ℃
+  input_window: 12               # 输入时间窗口 (过去12小时)
+  output_window: 12              # 输出时间窗口 (未来12小时)
+  num_stations: 512              # 使用的站点数量
+  train_sample_ratio: 0.4        # 训练集采样比例
+  val_sample_ratio: 0.4          # 验证集采样比例
+  test_sample_ratio: 0.4         # 测试集采样比例
+  batch_size: 4                  # 批次大小 (8GB 显存建议 4-8)
+  shuffle_train: true            # 是否打乱训练集
+
+# --- 图结构配置 ---
+graph:
+  cache_dir: "D:/bishe/hyper_tkan/data/cache"  # 图缓存目录
+  use_cache: true                              # 是否使用缓存
+  single_hypergraph:
+    enabled: true                  # 启用单超图
+    semantic_similarity: "cosine"  # 语义相似度: cosine/pearson/euclidean
+    geographic_similarity: "haversine"  # 地理相似度: haversine
+    alpha: 0.7                     # 语义融合系数 (0-1, 越大越重视语义)
+    threshold: 0.75                # 超边构建阈值
+    min_hyperedge_size: 3          # 超边最小节点数
+    max_hyperedge_size: 32         # 超边最大节点数
+    cache_dir: "D:/bishe/hyper_tkan/data/cache"  # 单超图缓存目录
+    use_cache: true                # 是否缓存单超图
+
+# --- 模型配置 ---
+model:
+  input_projection:
+    d_model: 32              # 输入投影维度
+  use_kan: true              # 是否使用 KAN (消融实验可设为 false)
+  spatial:
+    hidden_channels: 32      # 空间卷积隐藏通道数
+    dropout: 0.1             # Dropout 比例
+  temporal:
+    type: "tkan"             # 时序模型类型: tkan/gru/lstm
+    hidden_size: 32          # 时序隐藏层维度
+    num_layers: 1            # 时序层数
+    dropout: 0.1             # Dropout 比例
+    sub_kan_layers: 3        # TKAN 子 KAN 层数
+    kan_grid_size: 5         # KAN 网格大小
+    kan_spline_order: 3      # KAN 样条阶数
+  output_projection:
+    output_dim: 1            # 输出维度 (温度预测为1)
+
+# --- 训练配置 ---
+training:
+  optimizer:
+    type: "adam"            # 优化器: adam/adamw/sgd
+    lr: 0.001               # 学习率
+    weight_decay: 1.0e-5    # 权重衰减 (L2 正则)
+    betas: [0.9, 0.999]     # Adam 动量系数
+  scheduler:
+    type: "reduce_on_plateau"   # 学习率调度器
+    mode: "min"                 # 监控指标方向
+    factor: 0.5                 # 学习率衰减因子
+    patience: 8                 # 容忍 epoch 数
+    min_lr: 1.0e-6              # 最小学习率
+  loss:
+    type: "mae"               # 损失函数: mae/mse
+    step_weighted_mae: false  # 是否对每步 MAE 加权
+  epochs: 60                  # 训练轮数
+  early_stopping:
+    patience: 12              # 早停容忍轮数
+    min_delta: 1.0e-6         # 最小改善阈值
+  grad_clip: 5.0              # 梯度裁剪阈值
+  use_amp: true               # 是否使用混合精度训练 (节省显存)
+  accumulation_steps: 4       # 梯度累积步数
+  save_interval: 1            # 模型保存间隔
+  val_interval: 1             # 验证间隔
+
+# --- 评估配置 ---
+evaluation:
+  metrics: ["mae", "rmse", "mape"]  # 评估指标
+  visualize: true                    # 是否生成可视化
+  num_samples: 5                     # 可视化样本数
+
+# --- 输出配置 ---
+output:
+  base_dir: "D:/bishe/hyper_tkan/outputs"  # 输出根目录
+  save_predictions: true                    # 是否保存预测结果
+  save_model: true                          # 是否保存模型
+  save_plots: true                          # 是否保存图表
+  logging:
+    level: "INFO"      # 日志级别: DEBUG/INFO/WARNING/ERROR
+    console: true      # 是否输出到控制台
+    file: true         # 是否输出到文件
+
+# --- 消融实验配置 ---
+ablation:
+  disable_single_hypergraph: false  # 禁用单超图 (只用 TKAN)
+  disable_kan: false                # 禁用 KAN (改用 MLP)
+
+# --- 可复现性配置 ---
+reproducibility:
+  deterministic: true   # 是否启用确定性算法 (训练稍慢但可复现)
+  benchmark: false      # 是否启用基准模式 ( cudnn.benchmark )

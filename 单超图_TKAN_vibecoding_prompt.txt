@@ -1,0 +1,754 @@
+```markdown
+# 角色与目标
+
+你现在是一个资深 PyTorch 时空预测工程师。请你在 **`D:\bishe\hyper_tkan`** 下，从零到一实现一个可训练、可预测、可复现实验的 **单超图-TKAN 气象预测项目**。  
+目标不是继续复现双超图 HyperGKAN，而是实现一个**语义主导、地理约束的单超图 + TKAN 时序建模**的新模型，并且在**数据预处理、归一化、日志、输出目录、实验协议**上尽量与 **`D:\bishe\code\hyper_kan`** 和 baseline 保持一致，方便公平对比。
+
+---
+
+# 一、必须遵守的总要求
+
+## 1. 路径与工程位置
+- 所有新代码都写到：**`D:\bishe\hyper_tkan`**
+- 输出目录写到：**`D:\bishe\hyper_tkan\outputs`**
+- 参考工程：
+  - **`D:\bishe\code\hyper_kan`**
+  - baseline 仓库/代码按需要参考，但本项目的主要兼容对象是 `hyper_kan`
+
+## 2. 目标模型
+实现一个 **SingleHyper-TKAN**（命名可更规范，例如 `SingleHyperTKAN` / `HyperTKAN`），核心思想如下：
+
+- **空间部分**：  
+  不再使用 `hyper_kan` 的“邻域超图 + 语义超图”双分支卷积。  
+  改为**构图层面的信息融合**：先融合语义相似度与地理相似度，得到一个统一相似度，再据此构建**单超图**。
+- **语义部分**：  
+  只使用**统计特征**做站点表征，不使用完整历史序列相似度，不使用 embedding 编码器。
+- **地理部分**：  
+  只使用**经纬度两个量**构建地理相似度，**不使用海拔**。
+- **时序部分**：  
+  使用 **TKAN**，必须按 PyTorch 方式实现，参考 TKAN 论文中的 RKAN / 门控记忆思想来编写，不允许只写一个“名字叫 TKAN 的普通 GRU/LSTM”敷衍替代。
+- **输出方式**：  
+  非自回归地一次性输出未来 12 步预测结果。
+- **主要优化目标**：  
+  重点降低**每个时间步的 MAE**，不仅是 overall MAE。
+
+## 3. 对齐要求
+以下内容原则上尽量与 **`D:\bishe\code\hyper_kan`** 保持一致：
+- 数据读取
+- 数据预处理
+- 归一化 / 反归一化
+- 训练日志风格
+- 输出目录命名风格
+- 输出文件类型与内容
+- 预测流程
+- 指标统计口径
+- config 文件组织方式
+
+如无法完全复用，也要：
+1. 保持接口风格接近；
+2. 在 README 中说明与 `hyper_kan` 的差异；
+3. 保证用户可以直接按相似命令行方式运行。
+
+---
+
+# 二、先做的事情：先完整阅读并复用 hyper_kan 的结构风格
+
+请先仔细阅读本机路径 **`D:\bishe\code\hyper_kan`** 的代码文件，再开始编写 `hyper_tkan`。  
+优先阅读并尽量复用/参考以下模块设计思路（文件名可根据实际仓库为准）：
+
+- `configs/config.yaml`
+- `train.py`
+- `predict.py`
+- `main.py`
+- `src/data/*`
+- `src/models/*`
+- `src/training/*`
+- `src/utils/*`
+- `pause_resume/*`
+- 输出目录和日志写法
+
+如果发现本机工程结构和 GitHub 仓库结构有差异，请以**本机代码实际结构为准**。
+
+### 你要对齐的核心风格包括：
+1. **config 的字段风格与层级**
+2. **实验目录命名**
+3. **日志输出格式**
+4. **训练/预测命令行参数**
+5. **metrics / predictions / loss_curve / config_snapshot 等输出文件**
+6. **checkpoint 保存方式**
+7. **可视化图表风格**
+8. **resume / best_model / latest checkpoint 逻辑**
+
+---
+
+# 三、单超图-TKAN模型的完整方案
+
+## 1. 总体架构
+
+实现如下总体流程：
+
+**输入 X [B, T=12, N, F]**
+→ 输入投影  
+→ **单超图空间建模模块**  
+→ **TKAN 时序模块**  
+→ **非自回归预测头**  
+→ 输出 Y_pred [B, 12, N, C]
+
+### 推荐总体结构
+1. Input Projection
+2. Single Hypergraph Spatial Encoder
+3. TKAN Temporal Encoder
+4. Multi-step Non-autoregressive Prediction Head
+5. Output Projection
+
+---
+
+## 2. 单超图：构图层面的信息融合
+
+### 2.1 核心思想
+不是做双超图卷积后再融合，而是在**构图之前**先融合两类相似度：
+
+\[
+S_{ij}^{fusion} = \alpha \cdot \hat S_{ij}^{sem} + (1-\alpha)\cdot \hat S_{ij}^{geo}
+\]
+
+其中：
+- \(\hat S_{ij}^{sem}\)：归一化后的语义相似度
+- \(\hat S_{ij}^{geo}\)：归一化后的地理相似度
+- \(\alpha\)：语义主导系数，放到 config 里可配置
+
+请注意：
+- 这是**构图层面的信息融合**
+- **不是**原始 HyperGKAN 那种双分支卷积融合
+- 需要在 README 和代码注释中明确说明这一点
+
+---
+
+## 3. 语义相似度：只用统计特征做站点表征
+
+### 3.1 站点表征方式
+每个站点基于**训练集**生成统计特征向量，推荐至少包含：
+- mean
+- std
+- min
+- max
+- median
+- range(max-min)
+- 一阶差分均值
+- 一阶差分标准差
+- 简单周期性统计（可选，例如按 hour 聚合的均值波动）
+- 可再加入 skew / kurtosis（若实现稳定）
+
+请把这部分实现成独立模块，例如：
+- `src/graph/station_statistics.py`
+- 或 `src/graph/semantic_features.py`
+
+### 3.2 重要要求
+- **只能用训练集统计量构造语义特征**，不要泄漏 val/test
+- 对统计特征做标准化
+- 支持选择语义相似度类型，建议至少支持：
+  - cosine
+  - pearson
+  - euclidean（转相似度）
+- 最终得到 \(\hat S^{sem}\in [0,1]\)
+
+### 3.3 推荐默认方案
+默认用：
+- 统计特征标准化后
+- `cosine` 相似度
+- 再 min-max 映射到 `[0,1]`
+
+---
+
+## 4. 地理相似度：只用经纬度
+
+### 4.1 地理信息来源
+从 `position.pkl` 读取站点位置，只使用：
+- longitude
+- latitude
+
+不要使用海拔。
+
+### 4.2 推荐实现
+使用球面距离 / Haversine 距离，得到距离矩阵 `D_geo`，再转相似度：
+
+\[
+S_{ij}^{geo} = \exp(-D_{ij}/\sigma)
+\]
+
+或先标准化距离后：
+
+\[
+\hat S_{ij}^{geo} = 1 - \text{norm}(D_{ij})
+\]
+
+最终保证 \(\hat S^{geo}\in[0,1]\)
+
+### 4.3 要求
+- 提供独立实现文件
+- 支持缓存
+- 支持可视化地理相似度统计信息
+
+---
+
+## 5. 单超图构造：变规模超边
+
+### 5.1 核心规则
+对每个站点 \(i\)，根据融合相似度 \(S_{ij}^{fusion}\) 生成一个以该站点为中心的超边：
+
+- 把所有满足 \(S_{ij}^{fusion}\ge \tau\) 的站点加入超边
+- 因此超边节点数**不是固定的**
+- 这是该模型的重要创新点之一
+
+### 5.2 但是要加保护机制
+为防止超边过大或过小，增加：
+- `min_hyperedge_size`
+- `max_hyperedge_size`
+
+规则建议：
+1. 先按阈值选节点
+2. 若节点数 < `min_hyperedge_size`，补充 top-k 高相似节点
+3. 若节点数 > `max_hyperedge_size`，截断为 top-k
+4. 默认保留中心节点自身
+
+### 5.3 图表示
+生成：
+- incidence matrix `H`：shape `(N, E)`
+- hyperedge weights `W_e`
+- 可选 node-in-edge weights
+
+### 5.4 推荐权重
+初版可采用：
+- 超边权重 = 超边内融合相似度均值
+- 或统一设为 1
+
+后续在卷积层支持 learnable edge scaling 作为增强项。
+
+---
+
+## 6. 单超图卷积模块
+
+### 6.1 不再使用 DualHyperGKANConv
+请实现一个类似但更轻量的模块，例如：
+- `SingleHyperKANConv`
+- `SingleHyperConv`
+
+功能：
+- 输入 `(B, N, C)`
+- 根据单超图 `H, W`
+- 完成超图卷积聚合
+- 节点特征变换部分支持：
+  - `use_kan=true` 时使用 KAN / KANLinear
+  - `use_kan=false` 时使用 MLP 作为消融
+
+### 6.2 推荐公式
+可参考标准超图卷积：
+
+\[
+X' = \Phi\big(D_v^{-1/2} H W D_e^{-1} H^T D_v^{-1/2} X\big)
+\]
+
+其中：
+- `H` 为单超图关联矩阵
+- `W` 为超边权重
+- `Phi` 为 KAN 映射或 MLP
+
+### 6.3 时间维处理
+空间卷积建议仍采用 `hyper_kan` 的风格：
+- 对输入的每个时间步 `t` 独立做单超图卷积
+- 再堆叠回 `(B, T, N, C)`
+
+即：
+```python
+for t in range(T):
+    x_t = x[:, t, :, :]
+    out_t = single_hyper_conv(x_t, H, W)
+```
+
+这样更容易和 `hyper_kan` 对齐，也更稳。
+
+---
+
+# 四、时序部分：必须实现 TKAN
+
+## 1. 不能偷懒
+时序模块**必须不是普通 GRU/LSTM 的改名版本**。  
+要基于 TKAN 论文思想实现一个**真正的 TKAN PyTorch 版本**。
+
+## 2. 实现方案要求
+请参考 TKAN 论文中的以下关键思想完成实现：
+
+### 2.1 RKAN 子层思想
+每个时间步不仅更新普通 RNN hidden state，还维护 RKAN 子状态：
+
+\[
+s_{l,t} = W_{l,x}\,x_t + W_{l,h}\,\tilde h_{l,t-1}
+\]
+
+\[
+\tilde o_{l,t} = \phi_l(s_{l,t})
+\]
+
+\[
+\tilde h_{l,t} = W_{hh}\tilde h_{l,t-1} + W_{hz}\tilde o_{l,t}
+\]
+
+其中：
+- \(\phi_l\) 为 KAN 子层
+- 每个 RKAN 子层有自己的递归子状态
+
+### 2.2 LSTM-like 门控
+在 TKANCell 中实现：
+- forget gate
+- input gate
+- candidate memory
+- output gate
+
+其中 output gate 不直接由普通线性层产生，而是由多个 RKAN/KAN 子层输出拼接后生成：
+
+\[
+r_t = \text{Concat}[\phi_1(s_{1,t}), \phi_2(s_{2,t}), ..., \phi_L(s_{L,t})]
+\]
+
+\[
+o_t = \sigma(W_o r_t + b_o)
+\]
+
+再更新：
+\[
+c_t = f_t \odot c_{t-1} + i_t \odot \tilde c_t
+\]
+
+\[
+h_t = o_t \odot \tanh(c_t)
+\]
+
+### 2.3 推荐工程化实现
+请实现以下文件：
+
+- `src/models/kan_linear.py`
+- `src/models/tkan.py`
+- `src/models/tkan_cell.py`（可并入 `tkan.py`）
+- `src/models/single_hyper_tkan_model.py`
+
+### 2.4 推荐类结构
+```python
+class KANLinear(nn.Module):
+    ...
+class RKANSubLayer(nn.Module):
+    ...
+class TKANCell(nn.Module):
+    ...
+class TKANLayer(nn.Module):
+    ...
+class SingleHyperTKAN(nn.Module):
+    ...
+```
+
+### 2.5 关于 KAN 的工程取舍
+为了适配 8GB 显存，TKAN 中不建议做过重实现。请采用如下折中策略：
+
+- `KANLinear` 实现使用轻量版本：
+  - base linear term
+  - spline term / learnable univariate mapping
+- 若实现完整 B-spline 太复杂，则实现**工程可用且接口清晰的轻量 KANLinear**，但必须：
+  1. 命名清晰；
+  2. 注释中说明其与标准 KAN 的关系；
+  3. 不能直接退化成普通 Linear 而不说明；
+  4. 支持后续切换完整 KAN。
+
+### 2.6 推荐 TKAN 使用方式
+在本项目中，不采用论文里那种非常复杂的 stacked benchmark replication，而是采用适合当前任务的方式：
+
+- 先经过单超图空间增强，得到 `(B, T, N, D)`
+- reshape 为 `(B*N, T, D)`
+- 送入 `TKANLayer`
+- 输出最后隐状态或全序列表示
+- 再通过非自回归预测头输出未来 12 步
+
+推荐：
+- `return_sequences=False` 得到最终时序表示
+- 然后用 MLP/Linear 预测头一次性映射到 `12 * output_dim`
+- reshape 回 `(B, 12, N, C)`
+
+即推荐最终路径：
+
+```text
+Spatial Encoder
+→ reshape(B*N, T, D)
+→ TKAN
+→ last hidden
+→ prediction head
+→ (B, N, 12*C)
+→ reshape(B, 12, N, C)
+```
+
+这个方案更轻量，更适合 8GB 显存。
+
+---
+
+# 五、主要优化目标：降低每个时间步的 MAE
+
+## 1. 训练目标
+主损失默认采用 **MAE**
+并重点关注：
+- overall MAE
+- by_step MAE（每个 horizon 的 MAE）
+
+## 2. 训练与模型选择建议
+- 默认 loss：`MAE`
+- early stopping 主监控：`val_overall_mae`
+- 同时记录：
+  - `val_mae_step_1`
+  - `val_mae_step_2`
+  - ...
+  - `val_mae_step_12`
+
+## 3. 额外建议
+为了强化每步 MAE 表现，请实现一个可选配置：
+- `training.loss.step_weighted_mae: true/false`
+- 当为 true 时，支持对各步 MAE 加权求和
+- 但默认仍使用**等权 MAE**，以保证与 `hyper_kan` 可比
+
+---
+
+# 六、数据预处理与归一化：尽量复用 hyper_kan
+
+## 1. 这部分原则
+数据预处理、归一化、反归一化、context 处理、温度 K→℃、评估时的 inverse transform 等流程，**原则上和 `D:\bishe\code\hyper_kan` 保持一致**。
+
+## 2. 实现要求
+请优先复用或改写 `hyper_kan` 中相关模块，而不是重新随意写一套：
+- `src/data/pkl_loader.py`
+- `src/data/dataset.py`
+- `src/data/preprocessing.py`
+- `src/data/element_settings.py`
+- `src/utils/metrics.py`
+
+## 3. 数据一致性
+必须保持：
+- 输入窗口 12
+- 输出窗口 12
+- 相同的 train / val / test 读取逻辑
+- 相同的 scaler fit 逻辑
+- 相同的 inverse transform 逻辑
+- 相同的 context 拼接方式（若启用）
+- 相同的输出评估口径
+
+## 4. 重要要求
+请在 README 中写明：
+- 本项目的数据预处理流程与 `hyper_kan` 尽可能一致
+- 这样做是为了保证对比公平性
+
+---
+
+# 七、输出目录与日志：严格仿照 hyper_kan
+
+## 1. 输出目录
+输出到：
+- **`D:\bishe\hyper_tkan\outputs`**
+
+命名方式尽量仿照 `hyper_kan`，例如：
+- `outputs/<timestamp>_<Element>/`
+- 或者与 `hyper_kan` 现有命名方式完全一致
+
+## 2. 输出文件
+请尽量与 `hyper_kan` 保持一致，至少生成：
+
+- `config.yaml` / `config_snapshot.yaml`
+- `preprocessor.pkl`
+- `checkpoints/best_model.pt`
+- `checkpoints/last.pt` 或等价文件
+- `train_*.log`
+- `loss_curve.png`
+- `predictions.npz`
+- `metrics.json`
+- `test_summary.txt`
+- `baseline_comparison_summary.txt`（若能兼容）
+- `predictions_plot.png`
+- 每步指标图（若已有风格可对齐）
+
+## 3. 终端日志
+终端日志、文件日志风格全部尽量仿照 `hyper_kan`。  
+包括但不限于：
+- 实验开始分割线
+- 数据形状汇报
+- 模型参数量汇报
+- 当前 epoch 日志
+- best 指标标记
+- early stopping 提示
+- checkpoint 保存提示
+- 预测完成提示
+
+---
+
+# 八、config 文件：仿照 hyper_kan 的组织方式
+
+## 1. 必须仿照其层级风格
+请在 `D:\bishe\hyper_tkan\configs\config.yaml` 中采用与 `hyper_kan` 接近的结构，例如：
+
+```yaml
+dataset_selection:
+meta:
+data:
+graph:
+model:
+training:
+evaluation:
+output:
+ablation:
+reproducibility:
+```
+
+## 2. 必须新增的配置项
+### graph.single_hypergraph
+新增配置，例如：
+```yaml
+graph:
+  single_hypergraph:
+    enabled: true
+    semantic_similarity: "cosine"
+    geographic_similarity: "haversine"
+    alpha: 0.7
+    threshold: 0.75
+    min_hyperedge_size: 3
+    max_hyperedge_size: 32
+    cache_dir: "data/cache"
+    use_cache: true
+```
+
+### model.temporal
+```yaml
+model:
+  temporal:
+    type: "tkan"
+    hidden_size: 32
+    num_layers: 1
+    dropout: 0.1
+    sub_kan_layers: 3
+    kan_grid_size: 5
+    kan_spline_order: 3
+```
+
+### 其他
+- 保留 `use_kan`
+- 保留 `num_stations`
+- 保留 `sample_ratio`
+- 保留 `batch_size`
+- 保留 `use_amp`
+- 保留 `accumulation_steps`
+- 保留 `seed`
+
+---
+
+# 九、项目结构建议
+
+请在 `D:\bishe\hyper_tkan` 下组织为如下结构（可微调，但尽量接近 `hyper_kan`）：
+
+```text
+hyper_tkan/
+├── configs/
+│   └── config.yaml
+├── src/
+│   ├── data/
+│   │   ├── pkl_loader.py
+│   │   ├── dataset.py
+│   │   ├── preprocessing.py
+│   │   └── element_settings.py
+│   ├── graph/
+│   │   ├── station_statistics.py
+│   │   ├── geo_similarity.py
+│   │   ├── single_hypergraph.py
+│   │   └── hypergraph_utils.py
+│   ├── models/
+│   │   ├── kan_linear.py
+│   │   ├── single_hyper_conv.py
+│   │   ├── tkan.py
+│   │   └── single_hyper_tkan_model.py
+│   ├── training/
+│   │   └── trainer.py
+│   └── utils/
+│       ├── metrics.py
+│       ├── logger.py
+│       ├── checkpoint.py
+│       └── visualization.py
+├── outputs/
+├── data/
+│   └── cache/
+├── visuals/
+├── pause_resume/              # 如可复用则保留
+├── train.py
+├── predict.py
+├── main.py
+├── README.md
+└── requirements.txt
+```
+
+---
+
+# 十、推荐的实现细节与默认超参数（面向 RTX 5070 8GB）
+
+我的显卡是 **RTX 5070 8GB**。  
+请在 README 中给出**推荐配置**，并把默认 config 写成适合 8GB 显存的版本。
+
+## 1. 推荐默认配置
+建议默认：
+- `batch_size: 4` 或 `8`
+- `accumulation_steps: 2` 或 `4`
+- `num_stations: 512`（默认）
+- `hidden_dim / d_model: 32`
+- `single_hyper_conv hidden_channels: 32`
+- `tkan hidden_size: 32`
+- `tkan num_layers: 1`
+- `dropout: 0.1`
+- `use_amp: true`
+
+## 2. 推荐的运行档位
+请在 README 中明确提供三档：
+
+### A. 快速调试档
+- `num_stations: 128`
+- `sample_ratio: 0.1`
+- `epochs: 3`
+- `batch_size: 4`
+
+### B. 8GB 推荐档
+- `num_stations: 512`
+- `sample_ratio: 0.4~1.0`
+- `epochs: 50~100`
+- `batch_size: 4`
+- `accumulation_steps: 4`
+
+### C. 全量尝试档
+- `num_stations: 1024` 或更高
+- 必须提醒用户可能 OOM
+- 给出减小 batch / accumulation / hidden size 的建议
+
+---
+
+# 十一、README 必须写什么
+
+请写一个完整 `README.md`，至少包含：
+
+1. 项目简介
+2. 模型设计说明
+3. 与 `hyper_kan` 的关系与区别
+4. 单超图构图原理
+5. TKAN 设计说明
+6. 目录结构
+7. 环境依赖
+8. 如何安装
+9. 如何训练
+10. 如何预测
+11. 输出目录说明
+12. 推荐配置（重点说明 8GB 5070）
+13. 常见问题（OOM、训练慢、缓存、日志、resume）
+14. 可复现性说明
+15. 与 baseline/hyper_kan 对比时的注意事项
+
+并且明确写出：
+- `hyper_kan` 本机参考路径：**`D:\bishe\code\hyper_kan`**
+- 本项目输出路径：**`D:\bishe\hyper_tkan\outputs`**
+
+---
+
+# 十二、训练与预测脚本要求
+
+## 1. train.py
+需要支持：
+- `--config`
+- `--gpu`
+- `--resume`
+- `--device`
+- `--dataset`（若沿用 dataset_selection 也可兼容）
+- 自动保存 best / last checkpoint
+- 自动写日志
+- 自动保存 config snapshot
+
+## 2. predict.py
+需要支持：
+- 自动读取最新实验
+- 或指定 checkpoint / output_dir
+- 自动重建图与模型
+- 自动反归一化
+- 自动输出 metrics / summary / plot
+
+## 3. main.py
+尽量保持与 `hyper_kan` 风格一致，支持：
+- 仅训练
+- 仅预测
+- 一键 train+predict
+
+---
+
+# 十三、实验质量与可复现性
+
+必须确保：
+- 固定随机种子
+- 支持 deterministic 配置
+- 保存 config snapshot
+- 记录 git / 时间戳 / 路径信息（若容易实现）
+- 模型参数量打印
+- 数据形状打印
+- 图构建统计打印（节点数、超边数、平均超边大小、最大/最小超边大小）
+- 每步 MAE 统计与保存
+
+---
+
+# 十四、你最终需要交付的内容
+
+请在 `D:\bishe\hyper_tkan` 中完成以下交付：
+
+1. 完整可运行代码
+2. 完整 config
+3. 完整 README
+4. requirements.txt
+5. 可训练、可预测脚本
+6. 单超图缓存机制
+7. 对齐 `hyper_kan` 风格的日志与输出
+8. 至少一个 smoke test/最小运行样例
+9. 如果有必要，可加 `check_installation.py`
+
+---
+
+# 十五、编码要求
+
+- 使用 **Python + PyTorch**
+- 注释充分，尤其是 TKAN 部分
+- 不要只写伪代码，必须写可运行代码
+- 优先保证代码清晰、稳定、可复现
+- 避免过度复杂化
+- 遇到与 `hyper_kan` 重复逻辑，优先复用其设计风格
+- 所有路径在 Windows 下可直接工作
+- 尽量避免硬编码，但本机路径允许在默认 config 中体现
+
+---
+
+# 十六、建议的开发顺序（请按此顺序实施）
+
+1. 阅读并理解 `D:\bishe\code\hyper_kan`
+2. 复制并改造 data / utils / training 基础设施
+3. 先实现单超图构图模块
+4. 先实现 `SingleHyperConv`
+5. 再实现 `KANLinear`
+6. 再实现 `TKANCell / TKANLayer`
+7. 再实现完整 `SingleHyperTKAN` 模型
+8. 接入训练器
+9. 接入预测脚本
+10. 对齐日志与输出
+11. 写 README
+12. 做一个小规模 smoke run
+
+---
+
+# 十七、最后的执行要求
+
+请直接开始编码，不要只给方案。  
+在实现过程中：
+- 尽量保留 `hyper_kan` 的使用习惯
+- 明确标出新增模块与复用模块
+- 若某处与 `hyper_kan` 不完全一致，请在 README 中解释原因
+
+最终目标：
+**在 `D:\bishe\hyper_tkan` 下，产出一个能直接运行、结构完整、日志与输出风格接近 hyper_kan、以单超图 + TKAN 为核心的新项目。**
+```
