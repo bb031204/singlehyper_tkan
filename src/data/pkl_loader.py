@@ -129,3 +129,52 @@ def load_position_data(file_path: str) -> np.ndarray:
 def save_pkl_data(data: Any, file_path: str):
     with open(file_path, 'wb') as f:
         pickle.dump(data, f)
+
+
+def truncate_stations(data: Dict[str, Any], num_stations: int) -> Dict[str, Any]:
+    """截取前 num_stations 个站点。"""
+    out = {}
+    for key, v in data.items():
+        if v is None or not isinstance(v, np.ndarray):
+            out[key] = v
+            continue
+        if key in ('x', 'y'):
+            if v.ndim == 3 and v.shape[1] > num_stations:
+                out[key] = v[:, :num_stations, :]
+            elif v.ndim == 4 and v.shape[2] > num_stations:
+                out[key] = v[:, :, :num_stations, :]
+            else:
+                out[key] = v
+        elif key == 'context':
+            if v.ndim == 2 and v.shape[0] > num_stations:
+                out[key] = v[:num_stations, :]
+            elif v.ndim == 3 and v.shape[1] > num_stations:
+                out[key] = v[:, :num_stations, :]
+            elif v.ndim == 4 and v.shape[2] > num_stations:
+                out[key] = v[:, :, :num_stations, :]
+            else:
+                out[key] = v
+        elif key == 'position' and v.ndim >= 1 and v.shape[0] > num_stations:
+            out[key] = v[:num_stations]
+        else:
+            out[key] = v
+    return out
+
+
+def subsample_data(data: Dict[str, Any], ratio: float) -> Dict[str, Any]:
+    """按比例沿第一维（时间/样本维）均匀子采样。"""
+    if ratio >= 1.0:
+        return data
+    out = {}
+    for key, v in data.items():
+        if v is None or not isinstance(v, np.ndarray):
+            out[key] = v
+            continue
+        if key in ('x', 'y', 'context') and v.ndim >= 2:
+            total = v.shape[0]
+            n = max(1, int(total * ratio))
+            indices = np.round(np.linspace(0, total - 1, n)).astype(int)
+            out[key] = v[indices]
+        else:
+            out[key] = v
+    return out

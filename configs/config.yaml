@@ -31,7 +31,7 @@ data:
     use_longitude: true   # 经度
     use_latitude: true    # 纬度
     use_altitude: true    # 海拔
-    use_year: true        # 年份
+    use_year: false        # 年份
     use_month: true       # 月份
     use_day: true         # 日期
     use_hour: true        # 小时
@@ -41,12 +41,12 @@ data:
   kelvin_to_celsius: true        # 温度单位转换 K → ℃
   input_window: 12               # 输入时间窗口 (过去12小时)
   output_window: 12              # 输出时间窗口 (未来12小时)
-  num_stations: 512              # 使用的站点数量
-  train_sample_ratio: 0.4        # 训练集采样比例
-  val_sample_ratio: 0.4          # 验证集采样比例
-  test_sample_ratio: 0.4         # 测试集采样比例
-  batch_size: 4                  # 批次大小 (8GB 显存建议 4-8)
-  shuffle_train: true            # 是否打乱训练集
+  num_stations: 768              # 使用的站点数量
+  train_sample_ratio: 0.5        # 训练集采样比例
+  val_sample_ratio: 1.0          # 验证集采样比例
+  test_sample_ratio: 1.0         # 测试集采样比例
+  batch_size: 8                  # 批次大小 (8GB 显存建议 4-8)
+  shuffle_train: false            # 是否打乱训练集
 
 # --- 图结构配置 ---
 graph:
@@ -59,7 +59,7 @@ graph:
     alpha: 0.7                     # 语义融合系数 (0-1, 越大越重视语义)
     threshold: 0.75                # 超边构建阈值
     min_hyperedge_size: 3          # 超边最小节点数
-    max_hyperedge_size: 32         # 超边最大节点数
+    max_hyperedge_size: 15         # 超边最大节点数
     cache_dir: "D:/bishe/hyper_tkan/data/cache"  # 单超图缓存目录
     use_cache: true                # 是否缓存单超图
 
