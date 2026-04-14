@@ -22,7 +22,34 @@ def setup_logger(name: str = "SingleHyperTKAN", level: str = "INFO", output_dir:
     logger.setLevel(getattr(logging, level.upper()))
     logger.handlers.clear()
 
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    # 支持控制台 ANSI 颜色输出
+    class ColorFormatter(logging.Formatter):
+        """支持 ANSI 颜色的日志格式化器"""
+        GREY = '\033[90m'
+        BLUE = '\033[94m'
+        YELLOW = '\033[93m'
+        RED = '\033[91m'
+        GREEN = '\033[92m'
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+
+        def __init__(self, fmt=None, datefmt=None, style='%'):
+            super().__init__(fmt, datefmt, style)
+
+        def format(self, record):
+            levelname = record.levelname
+            if levelname == 'INFO':
+                levelname = f"{self.BLUE}{levelname}{self.RESET}"
+            elif levelname == 'WARNING':
+                levelname = f"{self.YELLOW}{levelname}{self.RESET}"
+            elif levelname == 'ERROR':
+                levelname = f"{self.RED}{levelname}{self.RESET}"
+
+            # 保留消息中的 ANSI 颜色代码（不转义）
+            record.levelname = levelname
+            return super().format(record)
+
+    formatter = ColorFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
     if console:
         ch = FlushStreamHandler(sys.stdout)

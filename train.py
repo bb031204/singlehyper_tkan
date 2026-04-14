@@ -15,7 +15,7 @@ import torch.nn as nn
 
 from src.data import (load_pkl_data, load_position_data, create_data_loaders,
                       DataPreprocessor, apply_element_settings,
-                      validate_dataset_selection, truncate_stations,
+                      validate_dataset_selection, sample_stations,
                       subsample_data)
 from src.graph import build_or_load_single_hypergraph, plot_geo_similarity_stats
 from src.models import SingleHyperTKAN
@@ -124,14 +124,17 @@ def main(args):
         context_feature_mask)
     position = load_position_data(config['data']['position_path'])
 
-    # --- 站点截取 ---
+    # --- 站点随机采样（与 hyper_kan 一致，seed 固定可复现） ---
     num_stations = config['data'].get('num_stations')
     if num_stations:
-        for d in [train_data, val_data, test_data]:
-            d.update(truncate_stations(d, num_stations))
-        if position is not None and position.shape[0] > num_stations:
-            position = position[:num_stations]
-        logger.info(f"Truncated to {num_stations} stations")
+        seed = config['meta']['seed']
+        total_before = position.shape[0] if position is not None else '?'
+        train_data, position, sel_idx = sample_stations(
+            train_data, position, num_stations, seed)
+        val_data, _, _ = sample_stations(val_data, None, num_stations, seed)
+        test_data, _, _ = sample_stations(test_data, None, num_stations, seed)
+        logger.info(f"Station sampling: {total_before} -> {num_stations} "
+                    f"(seed={seed}, idx range {sel_idx[0]}~{sel_idx[-1]})")
 
     # --- 样本采样 ---
     for name, d, key in [

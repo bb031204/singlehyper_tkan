@@ -4,10 +4,19 @@ from typing import Optional
 
 
 def save_checkpoint(state: dict, checkpoint_dir: str, filename: str = 'last.pt', is_best: bool = False):
+    """
+    保存 checkpoint，只保留 best_model.pt 和 last.pt
+
+    Args:
+        state: checkpoint 状态字典
+        checkpoint_dir: checkpoint 保存目录
+        filename: 保留的文件名（实际只用于记录日志）
+        is_best: 是否为最佳模型
+    """
     os.makedirs(checkpoint_dir, exist_ok=True)
-    path = os.path.join(checkpoint_dir, filename)
-    torch.save(state, path)
+    # 总是保存 last.pt（最新 checkpoint）
     torch.save(state, os.path.join(checkpoint_dir, 'last.pt'))
+    # 如果是最佳模型，更新 best_model.pt
     if is_best:
         torch.save(state, os.path.join(checkpoint_dir, 'best_model.pt'))
 

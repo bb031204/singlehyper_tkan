@@ -21,11 +21,12 @@ class RKANSubLayer(nn.Module):
         self.hz = KANLinear(hidden_size, hidden_size, grid_size, spline_order)
         self.hh = nn.Linear(hidden_size, hidden_size)
         self.phi = KANLinear(hidden_size, hidden_size, grid_size, spline_order)
+        self.z_norm = nn.LayerNorm(hidden_size)
 
     def forward(self, x_t, h_prev, z_prev):
         s_t = self.wx(x_t) + self.wh(z_prev)
         o_t = self.phi(s_t)
-        z_t = self.hh(z_prev) + self.hz(o_t)
+        z_t = self.z_norm(self.hh(z_prev) + self.hz(o_t))
         return o_t, z_t
 
 

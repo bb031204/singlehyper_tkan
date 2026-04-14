@@ -28,12 +28,12 @@ data:
   context_dim: 8                                     # 上下文特征维度
   use_dim4: true                                     # 是否使用第4维特征
   context_features:
-    use_longitude: true   # 经度
+    use_longitude: false   # 经度
     use_latitude: true    # 纬度
     use_altitude: true    # 海拔
     use_year: false        # 年份
     use_month: true       # 月份
-    use_day: true         # 日期
+    use_day: false    # 日期
     use_hour: true        # 小时
     use_region: false     # 区域编码
   normalize: true                # 是否归一化
@@ -41,12 +41,12 @@ data:
   kelvin_to_celsius: true        # 温度单位转换 K → ℃
   input_window: 12               # 输入时间窗口 (过去12小时)
   output_window: 12              # 输出时间窗口 (未来12小时)
-  num_stations: 768              # 使用的站点数量
-  train_sample_ratio: 0.5        # 训练集采样比例
+  num_stations: 1024              # 使用的站点数量
+  train_sample_ratio: 1.0        # 训练集采样比例
   val_sample_ratio: 1.0          # 验证集采样比例
   test_sample_ratio: 1.0         # 测试集采样比例
   batch_size: 8                  # 批次大小 (8GB 显存建议 4-8)
-  shuffle_train: false            # 是否打乱训练集
+  shuffle_train: true            # 是否打乱训练集
 
 # --- 图结构配置 ---
 graph:
@@ -57,7 +57,7 @@ graph:
     semantic_similarity: "cosine"  # 语义相似度: cosine/pearson/euclidean
     geographic_similarity: "haversine"  # 地理相似度: haversine
     alpha: 0.7                     # 语义融合系数 (0-1, 越大越重视语义)
-    threshold: 0.75                # 超边构建阈值
+    threshold: 0.70                # 超边构建阈值
     min_hyperedge_size: 3          # 超边最小节点数
     max_hyperedge_size: 15         # 超边最大节点数
     cache_dir: "D:/bishe/hyper_tkan/data/cache"  # 单超图缓存目录
@@ -66,18 +66,18 @@ graph:
 # --- 模型配置 ---
 model:
   input_projection:
-    d_model: 32              # 输入投影维度
+    d_model: 64              # 输入投影维度
   use_kan: true              # 是否使用 KAN (消融实验可设为 false)
   spatial:
-    hidden_channels: 32      # 空间卷积隐藏通道数
+    hidden_channels: 64      # 空间卷积隐藏通道数
     dropout: 0.1             # Dropout 比例
   temporal:
     type: "tkan"             # 时序模型类型: tkan/gru/lstm
-    hidden_size: 32          # 时序隐藏层维度
+    hidden_size: 64          # 时序隐藏层维度
     num_layers: 1            # 时序层数
     dropout: 0.1             # Dropout 比例
-    sub_kan_layers: 3        # TKAN 子 KAN 层数
-    kan_grid_size: 5         # KAN 网格大小
+    sub_kan_layers: 4        # TKAN 子 KAN 层数
+    kan_grid_size: 6         # KAN 网格大小
     kan_spline_order: 3      # KAN 样条阶数
   output_projection:
     output_dim: 1            # 输出维度 (温度预测为1)
@@ -86,21 +86,21 @@ model:
 training:
   optimizer:
     type: "adam"            # 优化器: adam/adamw/sgd
-    lr: 0.001               # 学习率
+    lr: 0.002               # 学习率
     weight_decay: 1.0e-5    # 权重衰减 (L2 正则)
     betas: [0.9, 0.999]     # Adam 动量系数
   scheduler:
     type: "reduce_on_plateau"   # 学习率调度器
     mode: "min"                 # 监控指标方向
     factor: 0.5                 # 学习率衰减因子
-    patience: 8                 # 容忍 epoch 数
+    patience: 10                 # 容忍 epoch 数
     min_lr: 1.0e-6              # 最小学习率
   loss:
     type: "mae"               # 损失函数: mae/mse
     step_weighted_mae: false  # 是否对每步 MAE 加权
-  epochs: 60                  # 训练轮数
+  epochs: 100                  # 训练轮数
   early_stopping:
-    patience: 12              # 早停容忍轮数
+    patience: 15              # 早停容忍轮数
     min_delta: 1.0e-6         # 最小改善阈值
   grad_clip: 5.0              # 梯度裁剪阈值
   use_amp: true               # 是否使用混合精度训练 (节省显存)
@@ -133,4 +133,4 @@ ablation:
 # --- 可复现性配置 ---
 reproducibility:
   deterministic: true   # 是否启用确定性算法 (训练稍慢但可复现)
-  benchmark: false      # 是否启用基准模式 ( cudnn.benchmark )
+  benchmark: true      # 是否启用基准模式 ( cudnn.benchmark )

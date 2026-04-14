@@ -70,6 +70,9 @@ class Trainer:
                     pred = self.model(x, self.H, self.W,
                                       output_length=y.shape[1])
                     loss = self._loss(pred, y) / self.accum_steps
+                if not torch.isfinite(loss):
+                    self.optimizer.zero_grad()
+                    continue
                 self.scaler.scale(loss).backward()
                 if (i + 1) % self.accum_steps == 0:
                     self.scaler.unscale_(self.optimizer)
@@ -82,6 +85,9 @@ class Trainer:
                 pred = self.model(x, self.H, self.W,
                                   output_length=y.shape[1])
                 loss = self._loss(pred, y) / self.accum_steps
+                if not torch.isfinite(loss):
+                    self.optimizer.zero_grad()
+                    continue
                 loss.backward()
                 if (i + 1) % self.accum_steps == 0:
                     torch.nn.utils.clip_grad_norm_(
@@ -143,12 +149,35 @@ class Trainer:
             'val_losses': self.val_losses,
             'config': self.config,
         }
-        fname = f'checkpoint_epoch_{self.current_epoch + 1}.pt'
-        save_checkpoint(state, self.ckpt_dir, filename=fname,
-                        is_best=is_best)
+        save_checkpoint(state, self.ckpt_dir, is_best=is_best)
         if logger:
-            logger.info(f"  Checkpoint saved: {fname}"
-                        + (" [best_model.pt updated]" if is_best else ""))
+            if is_best:
+                logger.info(f"  Checkpoint saved: last.pt [best_model.pt updated]")
+            else:
+                logger.info(f"  Checkpoint saved: last.pt")
+
+    def check_pause_flag(self) -> bool:
+        """检查是否存在暂停标志文件且已到达暂停时间。"""
+        pause_flag = os.path.join(self.output_dir, '.pause')
+        if not os.path.exists(pause_flag):
+            return False
+        try:
+            with open(pause_flag, 'r') as f:
+                pause_time = float(f.read().strip())
+            if time.time() >= pause_time:
+                return True
+            return False
+        except Exception:
+            return False
+
+    def clear_pause_flag(self):
+        """清除暂停标志文件。"""
+        pause_flag = os.path.join(self.output_dir, '.pause')
+        if os.path.exists(pause_flag):
+            try:
+                os.remove(pause_flag)
+            except OSError:
+                pass
 
     def resume_training(self, path):
         ckpt = load_checkpoint(path, self.model, self.optimizer,
@@ -191,7 +220,7 @@ class Trainer:
             if is_best:
                 self.best_val_mae = val_mae
                 self.bad_epochs = 0
-                msg += " ★ New Best"
+                msg += f" \033[92m★ New Best\033[0m"  # 绿色显示
             else:
                 self.bad_epochs += 1
 
@@ -206,6 +235,26 @@ class Trainer:
             plot_loss_curve(self.train_losses, self.val_losses,
                             os.path.join(self.output_dir, 'loss_curve.png'),
                             'Loss Curve')
+
+            # --- 暂停标志检测 ---
+            if self.check_pause_flag():
+                _log = logger.warning if logger else print
+                _log("=" * 60)
+                _log("PAUSE SIGNAL RECEIVED - Pausing training")
+                _log("=" * 60)
+                _log(f"Completed {ep + 1} epochs")
+                _log(f"Current best val MAE: {self.best_val_mae:.4f}")
+                self.save_ckpt(is_best=False, logger=logger)
+                self.clear_pause_flag()
+                _log("=" * 60)
+                _log("Checkpoint saved successfully!")
+                _log("To resume training, use:")
+                _log(f"  python train.py --resume "
+                     f"{os.path.join(self.ckpt_dir, 'last.pt')}")
+                _log("Or:")
+                _log("  python pause_resume/resume.py")
+                _log("=" * 60)
+                break
 
             if self.bad_epochs >= self.patience:
                 if logger:

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from ..graph.hypergraph_utils import normalized_hypergraph_matrix
 from .single_hyper_conv import SingleHyperConv
 from .tkan import TKANLayer
 
@@ -40,15 +41,22 @@ class SingleHyperTKAN(nn.Module):
             nn.Linear(tkan_hidden, pred_steps * output_dim)
         )
 
+        self._cached_A = None
+
     def forward(self, x, H, W, output_length: int = 12):
         B, T, N, _ = x.shape
         x = self.in_proj(x)
 
         if not self.bypass_spatial:
+            if self._cached_A is None or self._cached_A.shape[0] != N:
+                self._cached_A = normalized_hypergraph_matrix(
+                    H.to(x.device), W.to(x.device))
+            A = self._cached_A
+
             spatial_out = []
             for t in range(T):
                 xt = x[:, t, :, :]
-                yt = self.spatial(xt, H, W)
+                yt = self.spatial(xt, A)
                 spatial_out.append(yt)
             x = torch.stack(spatial_out, dim=1)
         else:

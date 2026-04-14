@@ -33,7 +33,11 @@ class KANLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         base = self.base_linear(x)
-        diff = base.unsqueeze(-1) - self.grid
+        # 强制 float32 避免 AMP float16 下 exp() 溢出导致 NaN
+        orig_dtype = base.dtype
+        base_f = base.float()
+        diff = base_f.unsqueeze(-1) - self.grid.float()
         rbf = torch.exp(-0.5 * diff ** 2)
-        spline = (rbf * self.spline_weight).sum(-1)
-        return base + spline * self.spline_scale
+        spline = (rbf * self.spline_weight.float()).sum(-1)
+        out = base_f + spline * self.spline_scale.float()
+        return out.to(orig_dtype)

@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from src.data import (load_pkl_data, load_position_data, SpatioTemporalDataset,
                       DataPreprocessor, apply_element_settings,
-                      validate_dataset_selection, truncate_stations,
+                      validate_dataset_selection, sample_stations,
                       subsample_data)
 from src.graph import build_or_load_single_hypergraph
 from src.models import SingleHyperTKAN
@@ -84,13 +84,13 @@ def main(args):
         context_feature_mask)
     position = load_position_data(config['data']['position_path'])
 
-    # --- 站点截取 ---
+    # --- 站点随机采样（与训练时一致） ---
     num_stations = config['data'].get('num_stations')
     if num_stations:
-        train_data = truncate_stations(train_data, num_stations)
-        test_data = truncate_stations(test_data, num_stations)
-        if position is not None and position.shape[0] > num_stations:
-            position = position[:num_stations]
+        seed = config['meta']['seed']
+        train_data, position, _ = sample_stations(
+            train_data, position, num_stations, seed)
+        test_data, _, _ = sample_stations(test_data, None, num_stations, seed)
 
     # --- 测试集采样 ---
     test_ratio = config['data'].get('test_sample_ratio', 1.0)
@@ -190,9 +190,12 @@ def main(args):
     # --- 可视化 ---
     if config['evaluation'].get('visualize', True):
         plot_predictions(
-            preds_inv, targets_inv,
-            os.path.join(exp_dir, 'predictions_plot.png'),
-            num_samples=config['evaluation'].get('num_samples', 5))
+            pred=preds_inv, target=targets_inv,
+            save_path=os.path.join(exp_dir, 'predictions_plot.png'),
+            num_samples=min(4, preds_inv.shape[0]),
+            num_stations=min(4, preds_inv.shape[2]),
+            horizon_steps=[3, 6, 12],
+            element=config['meta']['element'])
         step_mae_dict = {k: v['mae'] for k, v in by_step.items()}
         plot_step_metrics(
             step_mae_dict,

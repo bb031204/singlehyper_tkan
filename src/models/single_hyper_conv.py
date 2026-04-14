@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from ..graph.hypergraph_utils import normalized_hypergraph_matrix
 from .kan_linear import KANLinear
 
 
@@ -16,8 +15,9 @@ class SingleHyperConv(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, H: torch.Tensor, W: torch.Tensor):
-        A = normalized_hypergraph_matrix(H.to(x.device), W.to(x.device))
-        x = torch.einsum('nm,bmc->bnc', A, x)
+    def forward(self, x: torch.Tensor, A: torch.Tensor):
+        """接收预计算好的 float32 归一化超图矩阵 A (N,N)。"""
+        with torch.amp.autocast('cuda', enabled=False):
+            x = torch.einsum('nm,bmc->bnc', A, x.float())
         x = self.proj(x)
         return self.dropout(x)

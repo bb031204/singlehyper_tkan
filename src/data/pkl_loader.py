@@ -131,34 +131,57 @@ def save_pkl_data(data: Any, file_path: str):
         pickle.dump(data, f)
 
 
-def truncate_stations(data: Dict[str, Any], num_stations: int) -> Dict[str, Any]:
-    """截取前 num_stations 个站点。"""
+def sample_stations(data: Dict[str, Any], position: Optional[np.ndarray],
+                    num_stations: int, seed: int = 42
+                    ) -> tuple:
+    """从所有站点中随机选择 num_stations 个站点（对齐 hyper_kan）。
+
+    使用固定 seed 保证 train/val/test 选取完全相同的站点子集，
+    且跨运行可复现。返回 (sampled_data, sampled_position, selected_indices)。
+    """
+    if position is not None:
+        total = position.shape[0]
+    else:
+        for key in ('x', 'y'):
+            v = data.get(key)
+            if v is not None and isinstance(v, np.ndarray):
+                total = v.shape[2] if v.ndim == 4 else v.shape[1]
+                break
+        else:
+            return data, position, None
+
+    if num_stations >= total:
+        return data, position, np.arange(total)
+
+    rng = np.random.RandomState(seed)
+    selected = np.sort(rng.choice(total, num_stations, replace=False))
+
+    def _pick(v: np.ndarray, key: str) -> np.ndarray:
+        if key in ('x', 'y'):
+            if v.ndim == 3:
+                return v[:, selected, :]
+            elif v.ndim == 4:
+                return v[:, :, selected, :]
+        elif key == 'context':
+            if v.ndim == 2:
+                return v[selected, :]
+            elif v.ndim == 3:
+                return v[:, selected, :]
+            elif v.ndim == 4:
+                return v[:, :, selected, :]
+        elif key == 'position':
+            return v[selected]
+        return v
+
     out = {}
     for key, v in data.items():
         if v is None or not isinstance(v, np.ndarray):
             out[key] = v
-            continue
-        if key in ('x', 'y'):
-            if v.ndim == 3 and v.shape[1] > num_stations:
-                out[key] = v[:, :num_stations, :]
-            elif v.ndim == 4 and v.shape[2] > num_stations:
-                out[key] = v[:, :, :num_stations, :]
-            else:
-                out[key] = v
-        elif key == 'context':
-            if v.ndim == 2 and v.shape[0] > num_stations:
-                out[key] = v[:num_stations, :]
-            elif v.ndim == 3 and v.shape[1] > num_stations:
-                out[key] = v[:, :num_stations, :]
-            elif v.ndim == 4 and v.shape[2] > num_stations:
-                out[key] = v[:, :, :num_stations, :]
-            else:
-                out[key] = v
-        elif key == 'position' and v.ndim >= 1 and v.shape[0] > num_stations:
-            out[key] = v[:num_stations]
         else:
-            out[key] = v
-    return out
+            out[key] = _pick(v, key)
+
+    sampled_pos = position[selected] if position is not None else None
+    return out, sampled_pos, selected
 
 
 def subsample_data(data: Dict[str, Any], ratio: float) -> Dict[str, Any]:
