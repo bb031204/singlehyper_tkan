@@ -10,7 +10,7 @@ from ..utils.visualization import plot_loss_curve
 class Trainer:
     def __init__(self, model, train_loader, val_loader, optimizer, scheduler,
                  loss_fn, H, W, device, config, preprocessor=None,
-                 output_dir=None):
+                 output_dir=None, weather_dim: int = 1):
         self.model = model.to(device)
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -22,6 +22,7 @@ class Trainer:
         self.device = device
         self.config = config
         self.preprocessor = preprocessor
+        self.weather_dim = weather_dim
 
         self.epochs = config['training']['epochs']
         self.grad_clip = config['training']['grad_clip']
@@ -65,10 +66,12 @@ class Trainer:
         for i, batch in enumerate(pbar):
             x = batch['x'].to(self.device)
             y = batch['y'].to(self.device)
+            x_raw = x[:, :, :, :self.weather_dim]
             if self.scaler is not None:
                 with torch.amp.autocast('cuda', dtype=torch.float16):
                     pred = self.model(x, self.H, self.W,
-                                      output_length=y.shape[1])
+                                      output_length=y.shape[1],
+                                      x_raw=x_raw)
                     loss = self._loss(pred, y) / self.accum_steps
                 if not torch.isfinite(loss):
                     self.optimizer.zero_grad()
@@ -83,7 +86,8 @@ class Trainer:
                     self.optimizer.zero_grad()
             else:
                 pred = self.model(x, self.H, self.W,
-                                  output_length=y.shape[1])
+                                  output_length=y.shape[1],
+                                  x_raw=x_raw)
                 loss = self._loss(pred, y) / self.accum_steps
                 if not torch.isfinite(loss):
                     self.optimizer.zero_grad()
@@ -109,14 +113,17 @@ class Trainer:
             for batch in self.val_loader:
                 x = batch['x'].to(self.device)
                 y = batch['y'].to(self.device)
+                x_raw = x[:, :, :, :self.weather_dim]
                 if self.scaler is not None:
                     with torch.amp.autocast('cuda', dtype=torch.float16):
                         pred = self.model(x, self.H, self.W,
-                                          output_length=y.shape[1])
+                                          output_length=y.shape[1],
+                                          x_raw=x_raw)
                         loss = self._loss(pred, y)
                 else:
                     pred = self.model(x, self.H, self.W,
-                                      output_length=y.shape[1])
+                                      output_length=y.shape[1],
+                                      x_raw=x_raw)
                     loss = self._loss(pred, y)
                 total += loss.item()
                 n += 1

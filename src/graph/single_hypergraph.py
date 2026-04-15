@@ -57,7 +57,7 @@ def build_single_hypergraph(train_x: np.ndarray, position: np.ndarray, cfg: dict
         'edge_size_max': int(max(len(e) for e in edges)),
         'edge_size_mean': float(np.mean([len(e) for e in edges]))
     }
-    return torch.from_numpy(H), torch.from_numpy(W), stats
+    return torch.from_numpy(H), torch.from_numpy(W), stats, edges
 
 
 def build_or_load_single_hypergraph(train_x: np.ndarray, position: np.ndarray, cfg: dict):
@@ -72,8 +72,11 @@ def build_or_load_single_hypergraph(train_x: np.ndarray, position: np.ndarray, c
         H = torch.from_numpy(data['H'].astype(np.float32))
         W = torch.from_numpy(data['W'].astype(np.float32))
         stats = dict(data['stats'].item())
-        return H, W, stats
+        edges = [list(map(int, e)) for e in data['edges']]
+        return H, W, stats, edges
 
-    H, W, stats = build_single_hypergraph(train_x, position, cfg)
-    np.savez(cache_path, H=H.numpy(), W=W.numpy(), stats=np.array(stats, dtype=object))
-    return H, W, stats
+    H, W, stats, edges = build_single_hypergraph(train_x, position, cfg)
+    np.savez(cache_path, H=H.numpy(), W=W.numpy(),
+             stats=np.array(stats, dtype=object),
+             edges=np.array(edges, dtype=object))
+    return H, W, stats, edges

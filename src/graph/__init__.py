@@ -1,3 +1,5 @@
 from .single_hypergraph import build_or_load_single_hypergraph
 from .hypergraph_utils import normalized_hypergraph_matrix
 from .geo_similarity import plot_geo_similarity_stats
+from .dynamic_semantic_features import (
+    build_window_dynamic_features, dynamic_semantic_similarity)

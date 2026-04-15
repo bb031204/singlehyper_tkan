@@ -60,11 +60,17 @@ def load_pkl_data(file_path: str,
             context = np.tile(context[np.newaxis, :, :], (T, 1, 1))
 
         if context_feature_mask is not None and len(context_feature_mask) > 0:
+            # 真实数据通道顺序: 0=year 1=month 2=day 3=hour 4=region 5=altitude 6=latitude 7=longitude
+            _CH_NAMES = ['year', 'month', 'day', 'hour',
+                         'region', 'altitude', 'latitude', 'longitude']
             mask_len = min(len(context_feature_mask), context.shape[-1])
             selected_indices = [i for i in range(mask_len) if context_feature_mask[i]]
             if len(selected_indices) > 0:
+                sel_names = [_CH_NAMES[i] if i < len(_CH_NAMES) else f'ch{i}'
+                             for i in selected_indices]
                 context = context[..., selected_indices]
-                logger.info(f"Context features selected: {len(selected_indices)}/{mask_len}")
+                logger.info(f"Context features selected: indices={selected_indices} "
+                            f"names={sel_names} ({len(selected_indices)}/{mask_len})")
             else:
                 logger.warning("No context features selected by mask, disable context")
                 context = None

@@ -62,16 +62,17 @@ def main(args):
     preprocessor = DataPreprocessor.load(
         os.path.join(exp_dir, 'preprocessor.pkl'))
 
+    # context 通道真实顺序: 0=year 1=month 2=day 3=hour 4=region 5=altitude 6=latitude 7=longitude
     context_features = config['data'].get('context_features', {})
     context_feature_mask = [
-        context_features.get('use_longitude', True),
-        context_features.get('use_latitude', True),
-        context_features.get('use_altitude', True),
-        context_features.get('use_year', True),
-        context_features.get('use_month', True),
-        context_features.get('use_day', True),
-        context_features.get('use_hour', True),
-        context_features.get('use_region', True),
+        context_features.get('use_year', False),       # ch0
+        context_features.get('use_month', True),       # ch1
+        context_features.get('use_day', True),         # ch2
+        context_features.get('use_hour', True),        # ch3
+        context_features.get('use_region', False),     # ch4
+        context_features.get('use_altitude', True),    # ch5
+        context_features.get('use_latitude', True),    # ch6
+        context_features.get('use_longitude', True),   # ch7
     ]
 
     train_data = load_pkl_data(
@@ -101,7 +102,7 @@ def main(args):
     train_data_processed = preprocessor.transform(train_data)
     test_data = preprocessor.transform(test_data)
 
-    H, W, _ = build_or_load_single_hypergraph(
+    H, W, _, edges = build_or_load_single_hypergraph(
         train_data_processed['x'], position, config)
 
     dataset = SpatioTemporalDataset(
@@ -120,6 +121,7 @@ def main(args):
     input_dim = weather_dim + ctx_dim
 
     ablation = config.get('ablation', {})
+    ds_cfg = config.get('graph', {}).get('dynamic_semantic', {})
     model = SingleHyperTKAN(
         input_dim=input_dim,
         output_dim=config['model']['output_projection']['output_dim'],
@@ -134,12 +136,15 @@ def main(args):
         grid_size=config['model']['temporal'].get('kan_grid_size', 5),
         spline_order=config['model']['temporal'].get('kan_spline_order', 3),
         bypass_spatial=ablation.get('disable_single_hypergraph', False),
+        dynamic_semantic_cfg=ds_cfg,
     )
 
     device = args.device or config['meta']['device']
     if device == 'cuda' and not torch.cuda.is_available():
         device = 'cpu'
     model = model.to(device)
+    if ds_cfg.get('enabled', False):
+        model.register_edges(edges, torch.device(device))
     state = torch.load(ckpt, map_location=device)
     model.load_state_dict(state['model_state_dict'])
     model.eval()
@@ -149,8 +154,9 @@ def main(args):
         for batch in tqdm(loader, desc='Predicting', colour='green'):
             x = batch['x'].to(device)
             y = batch['y'].to(device)
+            x_raw = x[:, :, :, :weather_dim]
             p = model(x, H.to(device), W.to(device),
-                      output_length=y.shape[1])
+                      output_length=y.shape[1], x_raw=x_raw)
             all_inputs.append(x.cpu().numpy())
             all_preds.append(p.cpu().numpy())
             all_targets.append(y.cpu().numpy())

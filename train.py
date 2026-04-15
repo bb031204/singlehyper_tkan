@@ -41,6 +41,7 @@ def load_config(path: str):
 
 def build_model(config, input_dim):
     ablation = config.get('ablation', {})
+    ds_cfg = config.get('graph', {}).get('dynamic_semantic', {})
     return SingleHyperTKAN(
         input_dim=input_dim,
         output_dim=config['model']['output_projection']['output_dim'],
@@ -54,6 +55,7 @@ def build_model(config, input_dim):
         grid_size=config['model']['temporal'].get('kan_grid_size', 5),
         spline_order=config['model']['temporal'].get('kan_spline_order', 3),
         bypass_spatial=ablation.get('disable_single_hypergraph', False),
+        dynamic_semantic_cfg=ds_cfg,
     )
 
 
@@ -98,16 +100,17 @@ def main(args):
     logger.info('SingleHyperTKAN Training')
     logger.info('=' * 60)
 
+    # context 通道真实顺序: 0=year 1=month 2=day 3=hour 4=region 5=altitude 6=latitude 7=longitude
     context_features = config['data'].get('context_features', {})
     context_feature_mask = [
-        context_features.get('use_longitude', True),
-        context_features.get('use_latitude', True),
-        context_features.get('use_altitude', True),
-        context_features.get('use_year', True),
-        context_features.get('use_month', True),
-        context_features.get('use_day', True),
-        context_features.get('use_hour', True),
-        context_features.get('use_region', True),
+        context_features.get('use_year', False),       # ch0
+        context_features.get('use_month', True),       # ch1
+        context_features.get('use_day', True),         # ch2
+        context_features.get('use_hour', True),        # ch3
+        context_features.get('use_region', False),     # ch4
+        context_features.get('use_altitude', True),    # ch5
+        context_features.get('use_latitude', True),    # ch6
+        context_features.get('use_longitude', True),   # ch7
     ]
 
     train_data = load_pkl_data(
@@ -164,7 +167,7 @@ def main(args):
     test_data = preprocessor.transform(test_data)
     preprocessor.save(os.path.join(output_dir, 'preprocessor.pkl'))
 
-    H, W, graph_stats = build_or_load_single_hypergraph(
+    H, W, graph_stats, edges = build_or_load_single_hypergraph(
         train_data['x'], position, config)
     logger.info(f"Graph stats: {json.dumps(graph_stats, ensure_ascii=False)}")
 
@@ -190,6 +193,13 @@ def main(args):
     input_dim = weather_dim + ctx_dim
 
     model = build_model(config, input_dim)
+    device = config['meta']['device']
+    if device == 'cuda' and not torch.cuda.is_available():
+        device = 'cpu'
+    ds_cfg = config.get('graph', {}).get('dynamic_semantic', {})
+    if ds_cfg.get('enabled', False):
+        model.register_edges(edges, torch.device(device))
+        logger.info("Dynamic semantic weighting enabled")
     logger.info(f"Model parameters: {model.get_num_parameters():,}")
 
     opt_cfg = config['training']['optimizer']
@@ -204,14 +214,11 @@ def main(args):
         patience=sch_cfg['patience'], min_lr=sch_cfg['min_lr'])
 
     loss_fn = nn.L1Loss()
-    device = config['meta']['device']
-    if device == 'cuda' and not torch.cuda.is_available():
-        device = 'cpu'
 
     trainer = Trainer(
         model, train_loader, val_loader, optimizer, scheduler, loss_fn,
         H, W, device, config, preprocessor=preprocessor,
-        output_dir=output_dir)
+        output_dir=output_dir, weather_dim=weather_dim)
     trainer.train(resume_from=args.resume, logger=logger)
 
 

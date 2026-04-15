@@ -16,8 +16,17 @@ class SingleHyperConv(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, A: torch.Tensor):
-        """接收预计算好的 float32 归一化超图矩阵 A (N,N)。"""
+        """超图聚合 + 投影。
+
+        Args:
+            x: (B, N, D)
+            A: (N, N) 静态 或 (B, N, N) batch 动态
+        """
         with torch.amp.autocast('cuda', enabled=False):
-            x = torch.einsum('nm,bmc->bnc', A, x.float())
-        x = self.proj(x)
+            xf = x.float()
+            if A.dim() == 2:
+                xf = torch.einsum('nm,bmc->bnc', A, xf)
+            else:
+                xf = torch.bmm(A, xf)
+        x = self.proj(xf)
         return self.dropout(x)

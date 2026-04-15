@@ -27,15 +27,17 @@ data:
   use_context: true                                  # 是否使用上下文特征
   context_dim: 8                                     # 上下文特征维度
   use_dim4: true                                     # 是否使用第4维特征
+  # context 通道顺序（基于真实数据核查，见 context_semantics_report.md）:
+  #   0=year  1=month  2=day  3=hour  4=region  5=altitude  6=latitude  7=longitude
   context_features:
-    use_longitude: false   # 经度
-    use_latitude: true    # 纬度
-    use_altitude: true    # 海拔
-    use_year: false        # 年份
-    use_month: true       # 月份
-    use_day: false    # 日期
-    use_hour: true        # 小时
-    use_region: false     # 区域编码
+    use_year: false       # ch0  年份 (2010-2016)
+    use_month: true       # ch1  月份 (1-12)
+    use_day: false         # ch2  日期 (1-31)
+    use_hour: true        # ch3  小时 (0-11, 沿时间步递增)
+    use_region: false     # ch4  区域编码 (0-1, 归一化)
+    use_altitude: true    # ch5  海拔 (-29~4910m)
+    use_latitude: true    # ch6  纬度 (-87~87°)
+    use_longitude: true   # ch7  经度 (0~354°)
   normalize: true                # 是否归一化
   scaler_type: "standard"        # 归一化方式: standard/minmax
   kelvin_to_celsius: true        # 温度单位转换 K → ℃
@@ -56,12 +58,20 @@ graph:
     enabled: true                  # 启用单超图
     semantic_similarity: "cosine"  # 语义相似度: cosine/pearson/euclidean
     geographic_similarity: "haversine"  # 地理相似度: haversine
-    alpha: 0.7                     # 语义融合系数 (0-1, 越大越重视语义)
+    alpha: 0.3                     # 语义融合系数 (0-1, 越大越重视语义)
     threshold: 0.70                # 超边构建阈值
     min_hyperedge_size: 3          # 超边最小节点数
     max_hyperedge_size: 15         # 超边最大节点数
     cache_dir: "D:/bishe/hyper_tkan/data/cache"  # 单超图缓存目录
     use_cache: true                # 是否缓存单超图
+  dynamic_semantic:
+    enabled: true                         # 是否启用动态语义加权
+    feature_type: "window_stats"          # 动态特征类型 (window_stats)
+    similarity: "cosine"                  # 动态相似度计算方式 (cosine/dot)
+    use_local_update_only: true           # 仅在地理候选边内部更新（必须为 true）
+    local_update_mode: "edge_node_weight" # 局部更新模式
+    semantic_weight_lambda: 0.3           # 动态语义修正强度 (推荐 0.2-0.5)
+    normalize_dynamic_similarity: true    # 是否对动态相似度做 [0,1] 归一化
 
 # --- 模型配置 ---
 model:
@@ -98,7 +108,7 @@ training:
   loss:
     type: "mae"               # 损失函数: mae/mse
     step_weighted_mae: false  # 是否对每步 MAE 加权
-  epochs: 100                  # 训练轮数
+  epochs: 150                  # 训练轮数
   early_stopping:
     patience: 15              # 早停容忍轮数
     min_delta: 1.0e-6         # 最小改善阈值
