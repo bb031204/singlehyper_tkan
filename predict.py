@@ -50,6 +50,13 @@ def main(args):
     if exp_dir is None:
         raise FileNotFoundError('未找到实验输出目录，请先训练')
 
+    # 优先使用训练时保存的 config_snapshot，保证 context mask 等参数与训练一致
+    snapshot_path = os.path.join(exp_dir, 'config_snapshot.yaml')
+    if os.path.exists(snapshot_path):
+        logger.info(f'Loading config snapshot from: {snapshot_path}')
+        config = load_config(snapshot_path)
+        config = apply_element_settings(config)
+
     ckpt = args.checkpoint
     if ckpt is None:
         ckpt = get_latest_checkpoint(os.path.join(exp_dir, 'checkpoints'))

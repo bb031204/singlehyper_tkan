@@ -129,6 +129,7 @@ class SingleHyperTKAN(nn.Module):
 
         self._cached_A_static = None
         self._edge_tensors = None
+        self._last_W_dynamic_stats = None
 
     def register_edges(self, edges: list, device: torch.device):
         """将候选边列表转换为 GPU tensor 缓存，避免每次 forward 重新构建。"""
@@ -170,6 +171,12 @@ class SingleHyperTKAN(nn.Module):
                     self._edge_tensors['centers'],
                     self._edge_tensors['offsets'],
                 )
+                self._last_W_dynamic_stats = {
+                    'min': float(W_dyn.min()),
+                    'max': float(W_dyn.max()),
+                    'mean': float(W_dyn.mean()),
+                    'std': float(W_dyn.std()),
+                }
                 A = normalized_hypergraph_matrix(H.to(x.device), W_dyn)  # (B, N, N)
             else:
                 if self._cached_A_static is None or self._cached_A_static.shape[-1] != N:

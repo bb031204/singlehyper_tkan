@@ -169,7 +169,32 @@ def main(args):
 
     H, W, graph_stats, edges = build_or_load_single_hypergraph(
         train_data['x'], position, config)
-    logger.info(f"Graph stats: {json.dumps(graph_stats, ensure_ascii=False)}")
+
+    # ---- 训练前：打印超图详细统计 ----
+    logger.info("=" * 60)
+    logger.info("Hypergraph Statistics (before training)")
+    logger.info("-" * 40)
+    logger.info(f"  Nodes: {graph_stats['num_nodes']}, Edges: {graph_stats['num_edges']}")
+    # 融合超图
+    logger.info(f"  [Fusion]  edge size  min={graph_stats['edge_size_min']}  "
+                f"max={graph_stats['edge_size_max']}  "
+                f"mean={graph_stats['edge_size_mean']:.2f}")
+    # 地理超图
+    if 'geo_edge' in graph_stats:
+        g = graph_stats['geo_edge']
+        logger.info(f"  [Geo]     edge size  min={g['min']}  max={g['max']}  mean={g['mean']:.2f}")
+    # 语义超图
+    if 'sem_edge' in graph_stats:
+        s = graph_stats['sem_edge']
+        logger.info(f"  [Semantic] edge size min={s['min']}  max={s['max']}  mean={s['mean']:.2f}")
+    # 静态权重（优先用 graph_stats 中的值，旧缓存无此字段时从 W tensor 计算）
+    w_min = graph_stats.get('static_W_min', float(W.min()))
+    w_max = graph_stats.get('static_W_max', float(W.max()))
+    w_mean = graph_stats.get('static_W_mean', float(W.float().mean()))
+    w_std = graph_stats.get('static_W_std', float(W.float().std()))
+    logger.info(f"  [Static W] min={w_min:.4f}  max={w_max:.4f}  "
+                f"mean={w_mean:.4f}  std={w_std:.4f}")
+    logger.info("=" * 60)
 
     if config['evaluation'].get('visualize', True) and position is not None:
         geo_stats = plot_geo_similarity_stats(position, output_dir)

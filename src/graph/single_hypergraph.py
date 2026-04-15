@@ -36,6 +36,13 @@ def build_single_hypergraph(train_x: np.ndarray, position: np.ndarray, cfg: dict
     s_fusion = alpha * s_sem + (1.0 - alpha) * s_geo
 
     N = s_fusion.shape[0]
+
+    # 分别用地理和语义矩阵构边，记录各自的统计信息
+    geo_edges = [_edge_from_threshold(s_geo[i], i, threshold, min_size, max_size)
+                 for i in range(N)]
+    sem_edges = [_edge_from_threshold(s_sem[i], i, threshold, min_size, max_size)
+                 for i in range(N)]
+
     edges = []
     weights = []
     for i in range(N):
@@ -50,12 +57,24 @@ def build_single_hypergraph(train_x: np.ndarray, position: np.ndarray, cfg: dict
         H[nodes, e_idx] = 1.0
 
     W = np.array(weights, dtype=np.float32)
+
+    def _edge_stats(elist):
+        sizes = [len(e) for e in elist]
+        return {'min': int(min(sizes)), 'max': int(max(sizes)),
+                'mean': float(np.mean(sizes))}
+
     stats = {
         'num_nodes': N,
         'num_edges': E,
         'edge_size_min': int(min(len(e) for e in edges)),
         'edge_size_max': int(max(len(e) for e in edges)),
-        'edge_size_mean': float(np.mean([len(e) for e in edges]))
+        'edge_size_mean': float(np.mean([len(e) for e in edges])),
+        'geo_edge': _edge_stats(geo_edges),
+        'sem_edge': _edge_stats(sem_edges),
+        'static_W_min': float(W.min()),
+        'static_W_max': float(W.max()),
+        'static_W_mean': float(W.mean()),
+        'static_W_std': float(W.std()),
     }
     return torch.from_numpy(H), torch.from_numpy(W), stats, edges
 

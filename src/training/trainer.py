@@ -238,6 +238,18 @@ class Trainer:
             else:
                 print(msg)
 
+            # ---- 打印 W_dynamic 统计 ----
+            w_stats = getattr(self.model, '_last_W_dynamic_stats', None)
+            if w_stats is not None:
+                dyn_msg = (f"  [W_dynamic] min={w_stats['min']:.4f}  "
+                           f"max={w_stats['max']:.4f}  "
+                           f"mean={w_stats['mean']:.4f}  "
+                           f"std={w_stats['std']:.4f}")
+                if logger:
+                    logger.info(dyn_msg)
+                else:
+                    print(dyn_msg)
+
             self.save_ckpt(is_best=is_best, logger=logger)
             plot_loss_curve(self.train_losses, self.val_losses,
                             os.path.join(self.output_dir, 'loss_curve.png'),

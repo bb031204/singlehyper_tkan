@@ -43,7 +43,7 @@ data:
   kelvin_to_celsius: true        # 温度单位转换 K → ℃
   input_window: 12               # 输入时间窗口 (过去12小时)
   output_window: 12              # 输出时间窗口 (未来12小时)
-  num_stations: 1024              # 使用的站点数量
+  num_stations: 1200              # 使用的站点数量
   train_sample_ratio: 1.0        # 训练集采样比例
   val_sample_ratio: 1.0          # 验证集采样比例
   test_sample_ratio: 1.0         # 测试集采样比例
