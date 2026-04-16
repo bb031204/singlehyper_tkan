@@ -238,17 +238,21 @@ class Trainer:
             else:
                 print(msg)
 
-            # ---- 打印 W_dynamic 统计 ----
-            w_stats = getattr(self.model, '_last_W_dynamic_stats', None)
-            if w_stats is not None:
-                dyn_msg = (f"  [W_dynamic] min={w_stats['min']:.4f}  "
-                           f"max={w_stats['max']:.4f}  "
-                           f"mean={w_stats['mean']:.4f}  "
-                           f"std={w_stats['std']:.4f}")
-                if logger:
-                    logger.info(dyn_msg)
-                else:
-                    print(dyn_msg)
+            # ---- 打印 W_dynamic 统计（整轮累积） ----
+            get_fn = getattr(self.model, 'get_w_dynamic_stats', None)
+            if get_fn is not None:
+                w_stats = get_fn()
+                if w_stats is not None:
+                    dyn_msg = (
+                        f"  [W_dynamic] min={w_stats['min']:.4f}  "
+                        f"max={w_stats['max']:.4f}  "
+                        f"mean={w_stats['mean']:.4f}  "
+                        f"std_across_batches={w_stats['std_of_batch_means']:.4f}  "
+                        f"(accumulated over {w_stats['num_batches']} batches)")
+                    if logger:
+                        logger.info(dyn_msg)
+                    else:
+                        print(dyn_msg)
 
             self.save_ckpt(is_best=is_best, logger=logger)
             plot_loss_curve(self.train_losses, self.val_losses,

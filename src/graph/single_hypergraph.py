@@ -1,14 +1,26 @@
 import os
+import logging
 import numpy as np
 import torch
 from .station_statistics import build_station_statistics, semantic_similarity
 from .geo_similarity import geo_similarity_from_position
 
+logger = logging.getLogger('SingleHyperTKAN')
 
-def _edge_from_threshold(row_sim, center, threshold, min_size, max_size):
-    idx = np.where(row_sim >= threshold)[0].tolist()
+
+def _edge_from_percentile(row_sim, center, percentile, min_size, max_size):
+    """自适应局部百分位构边：每个站点根据自身相似度分布确定阈值。
+
+    percentile=99.5 表示取该站相似度排名前 0.5% 的邻居。
+    """
+    mask = np.ones(len(row_sim), dtype=bool)
+    mask[center] = False
+    local_threshold = np.percentile(row_sim[mask], percentile)
+
+    idx = np.where(row_sim >= local_threshold)[0].tolist()
     if center not in idx:
         idx.append(center)
+
     order = np.argsort(-row_sim)
     if len(idx) < min_size:
         for j in order:
@@ -26,9 +38,12 @@ def _edge_from_threshold(row_sim, center, threshold, min_size, max_size):
 def build_single_hypergraph(train_x: np.ndarray, position: np.ndarray, cfg: dict):
     gcfg = cfg['graph']['single_hypergraph']
     alpha = float(gcfg['alpha'])
-    threshold = float(gcfg['threshold'])
     min_size = int(gcfg['min_hyperedge_size'])
     max_size = int(gcfg['max_hyperedge_size'])
+
+    p_geo = float(gcfg.get('geo_percentile', 99.5))
+    p_sem = float(gcfg.get('sem_percentile', 99.5))
+    p_fusion = float(gcfg.get('fusion_percentile', 99.5))
 
     sem_feat = build_station_statistics(train_x)
     s_sem = semantic_similarity(sem_feat, gcfg.get('semantic_similarity', 'cosine'))
@@ -37,16 +52,26 @@ def build_single_hypergraph(train_x: np.ndarray, position: np.ndarray, cfg: dict
 
     N = s_fusion.shape[0]
 
-    # 分别用地理和语义矩阵构边，记录各自的统计信息
-    geo_edges = [_edge_from_threshold(s_geo[i], i, threshold, min_size, max_size)
+    # 打印相似度矩阵分位数分布
+    pcts = [50, 75, 90, 95, 99, 99.5]
+    for name, mat in [('Geo', s_geo), ('Semantic', s_sem), ('Fusion', s_fusion)]:
+        vals = mat[np.triu_indices(N, k=1)]
+        qs = np.percentile(vals, pcts)
+        q_str = '  '.join(f'P{p}={v:.4f}' for p, v in zip(pcts, qs))
+        logger.info(f"  [{name}] similarity distribution: {q_str}")
+
+    logger.info(f"  Adaptive percentile: geo={p_geo}  sem={p_sem}  fusion={p_fusion}")
+
+    # 三种边均使用自适应局部百分位构边
+    geo_edges = [_edge_from_percentile(s_geo[i], i, p_geo, min_size, max_size)
                  for i in range(N)]
-    sem_edges = [_edge_from_threshold(s_sem[i], i, threshold, min_size, max_size)
+    sem_edges = [_edge_from_percentile(s_sem[i], i, p_sem, min_size, max_size)
                  for i in range(N)]
 
     edges = []
     weights = []
     for i in range(N):
-        e = _edge_from_threshold(s_fusion[i], i, threshold, min_size, max_size)
+        e = _edge_from_percentile(s_fusion[i], i, p_fusion, min_size, max_size)
         edges.append(e)
         sub = s_fusion[i, e]
         weights.append(float(np.mean(sub)))
@@ -83,7 +108,11 @@ def build_or_load_single_hypergraph(train_x: np.ndarray, position: np.ndarray, c
     gcfg = cfg['graph']['single_hypergraph']
     os.makedirs(gcfg['cache_dir'], exist_ok=True)
     N = position.shape[0]
-    cache_name = f"single_{cfg['meta']['element']}_N{N}_a{gcfg['alpha']}_t{gcfg['threshold']}.npz"
+    pg = gcfg.get('geo_percentile', 99.5)
+    ps = gcfg.get('sem_percentile', 99.5)
+    pf = gcfg.get('fusion_percentile', 99.5)
+    cache_name = (f"single_{cfg['meta']['element']}_N{N}"
+                  f"_a{gcfg['alpha']}_pg{pg}_ps{ps}_pf{pf}.npz")
     cache_path = os.path.join(gcfg['cache_dir'], cache_name)
 
     if gcfg.get('use_cache', True) and os.path.exists(cache_path):

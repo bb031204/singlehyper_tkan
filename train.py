@@ -174,6 +174,10 @@ def main(args):
     logger.info("=" * 60)
     logger.info("Hypergraph Statistics (before training)")
     logger.info("-" * 40)
+    _gcfg = config['graph']['single_hypergraph']
+    logger.info(f"  percentile  geo={_gcfg.get('geo_percentile', 99.5)}  "
+                f"sem={_gcfg.get('sem_percentile', 99.5)}  "
+                f"fusion={_gcfg.get('fusion_percentile', 99.5)}")
     logger.info(f"  Nodes: {graph_stats['num_nodes']}, Edges: {graph_stats['num_edges']}")
     # 融合超图
     logger.info(f"  [Fusion]  edge size  min={graph_stats['edge_size_min']}  "

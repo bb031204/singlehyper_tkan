@@ -58,10 +58,12 @@ graph:
     enabled: true                  # 启用单超图
     semantic_similarity: "cosine"  # 语义相似度: cosine/pearson/euclidean
     geographic_similarity: "haversine"  # 地理相似度: haversine
-    alpha: 0.3                     # 语义融合系数 (0-1, 越大越重视语义)
-    threshold: 0.70                # 超边构建阈值
-    min_hyperedge_size: 3          # 超边最小节点数
-    max_hyperedge_size: 15         # 超边最大节点数
+    alpha: 0.4                     # 语义融合系数 (0-1, 越大越重视语义)
+    geo_percentile: 99.65          # 地理边：取每站 top 0.25% 最近邻 (~3 基础, min 兜底到 4)
+    sem_percentile: 99.65          # 语义边：取每站 top 0.25% 最相似邻
+    fusion_percentile: 99.65       # 融合边：取每站 top 0.25% 邻居 (实际构建 H/W)
+    min_hyperedge_size: 4          # 保底最小节点数
+    max_hyperedge_size: 15         # 安全上限节点数
     cache_dir: "D:/bishe/hyper_tkan/data/cache"  # 单超图缓存目录
     use_cache: true                # 是否缓存单超图
   dynamic_semantic:
@@ -76,14 +78,14 @@ graph:
 # --- 模型配置 ---
 model:
   input_projection:
-    d_model: 64              # 输入投影维度
+    d_model: 80              # 输入投影维度
   use_kan: true              # 是否使用 KAN (消融实验可设为 false)
   spatial:
-    hidden_channels: 64      # 空间卷积隐藏通道数
+    hidden_channels: 80      # 空间卷积隐藏通道数
     dropout: 0.1             # Dropout 比例
   temporal:
     type: "tkan"             # 时序模型类型: tkan/gru/lstm
-    hidden_size: 64          # 时序隐藏层维度
+    hidden_size: 80          # 时序隐藏层维度
     num_layers: 1            # 时序层数
     dropout: 0.1             # Dropout 比例
     sub_kan_layers: 4        # TKAN 子 KAN 层数
@@ -103,7 +105,7 @@ training:
     type: "reduce_on_plateau"   # 学习率调度器
     mode: "min"                 # 监控指标方向
     factor: 0.5                 # 学习率衰减因子
-    patience: 10                 # 容忍 epoch 数
+    patience: 8                 # 容忍 epoch 数
     min_lr: 1.0e-6              # 最小学习率
   loss:
     type: "mae"               # 损失函数: mae/mse
